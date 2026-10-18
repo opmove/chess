@@ -41,25 +41,46 @@ function highlightSquares(from, to) {
   }
 }
 
-// PV（UCI 列）を SAN の読み筋テキストに変換する
+// 1 手を人間が読みやすいテキストに変換する（例: "♞がa3の♙を取り、チェック"）
+function moveToText(m) {
+  const glyphs = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
+  const names = { q: "クイーン", r: "ルーク", b: "ビショップ", n: "ナイト" };
+  const isCheck = m.san.endsWith("+");
+  const isMate = m.san.endsWith("#");
+  const suffix = isMate ? "、チェックメイト" : isCheck ? "、チェック" : "";
+  if (m.flags.includes("k")) return "ショートキャスリング" + suffix;
+  if (m.flags.includes("q")) return "ロングキャスリング" + suffix;
+  let text = glyphs[m.piece] + "が" + m.to;
+  if (m.flags.includes("e")) {
+    text += "でアンパッサン";
+  } else if (m.captured) {
+    text += "の" + glyphs[m.captured] + "を取り";
+  } else {
+    text += "に動き";
+  }
+  if (m.promotion) text += "、" + names[m.promotion] + "に昇進";
+  return text + suffix;
+}
+
+// PV（UCI 列）を読み筋テキストに変換する
 function pvToSanText(pv) {
   const chess = fenChess;
   chess.reset();
   chess.load(FEN);
-  const sans = [];
+  const texts = [];
   for (const uci of pv.split(/\s+/)) {
     if (!uci || uci === "(none)") break;
     try {
       const isWhiteMove = chess.turn() === "w";
       const m = chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci.slice(4, 5) || undefined });
       if (!m) break;
-      const num = Math.floor(sans.length / 2) + 1;
-      sans.push((isWhiteMove ? num + ". " : "") + m.san);
+      const num = Math.floor(texts.length / 2) + 1;
+      texts.push((isWhiteMove ? num + ". " : "") + moveToText(m));
     } catch (e) {
       break;
     }
   }
-  return sans.join(" ");
+  return texts.join(" ");
 }
 
 // 「なぜ最善か」の簡易注釈を生成する
@@ -93,7 +114,7 @@ function buildReason(info) {
       if (cp >= 200) parts.push("白が約 " + Math.round(cp / 100) + " ポーン優勢になる");
     }
   }
-  if (info.pvText) parts.push("読み筋: " + info.pvText);
+  if (parts.length) parts.push("読み筋:");
   return parts.length ? parts.join("。") : "探索上もっとも評価値が高い手";
 }
 
@@ -161,6 +182,13 @@ btn.addEventListener("click", async () => {
     line2.textContent = "理由: " + reason;
     resultEl.appendChild(line1);
     resultEl.appendChild(line2);
+    if (info.pvText) {
+      const pvEl = document.createElement("div");
+      pvEl.className = "pv";
+      // 1 手番（白+黒）ごとに改行して表示
+      pvEl.textContent = info.pvText.replace(/(\d+\. [^ ]+ [^ ]+) /g, "$1\n").trim();
+      resultEl.appendChild(pvEl);
+    }
   } catch (err) {
     console.error(err);
     resultEl.textContent = "エンジンを初期化できませんでした";
@@ -212,6 +240,8 @@ const Board: FC<{ fen: string; lastMove: string | null }> = ({ fen, lastMove }) 
           }
         >
           {piece ? <span class="piece">{PIECES[piece]}</span> : null}
+          {file === 0 ? <span class="coord rank">{8 - r}</span> : null}
+          {r === 7 ? <span class="coord file">{FILES[file]}</span> : null}
           {sq === epSquare ? <span class="ep-dot" /> : null}
           {castleMark.has(sq) ? <span class="castle-mark">{castleLegal ? "○" : "△"}</span> : null}
         </div>,
@@ -281,6 +311,7 @@ export const BoardPage: FC<{ fen: string; lastMove?: string | null }> = ({ fen, 
             margin-bottom: 12px;
           }
           .square {
+            position: relative;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -303,7 +334,18 @@ export const BoardPage: FC<{ fen: string; lastMove?: string | null }> = ({ fen, 
             border-radius: 50%;
             background: rgba(0, 120, 255, 0.8);
           }
-          .square.ep, .square.castle-ok, .square.castle-rights { position: relative; }
+          .coord {
+            position: absolute;
+            font-size: clamp(8px, 2.5vw, 12px);
+            line-height: 1;
+            color: rgba(0, 0, 0, 0.55);
+            font-weight: bold;
+            pointer-events: none;
+          }
+          .coord.rank { top: 2%; left: 3%; }
+          .coord.file { bottom: 2%; right: 4%; }
+          .light .coord { color: rgba(0, 0, 0, 0.45); }
+          .dark .coord { color: rgba(255, 255, 255, 0.7); }
           .castle-mark {
             position: absolute;
             top: 2%;
@@ -331,6 +373,12 @@ export const BoardPage: FC<{ fen: string; lastMove?: string | null }> = ({ fen, 
             font-size: 0.85rem;
             color: #444;
             line-height: 1.5;
+          }
+          #result .pv {
+            margin-top: 8px;
+            font-size: 1.1rem;
+            line-height: 1.8;
+            white-space: pre-line;
           }
           footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid #ddd; }
         `}</style>
