@@ -40,6 +40,57 @@ function highlightSquares(from, to) {
   }
 }
 
+// PV（UCI 列）を SAN の読み筋テキストに変換する
+function pvToSanText(pv) {
+  const chess = fenChess;
+  chess.reset();
+  chess.load(FEN);
+  const sans = [];
+  for (const uci of pv.split(/\s+/)) {
+    if (!uci || uci === "(none)") break;
+    try {
+      const isWhiteMove = chess.turn() === "w";
+      const m = chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci.slice(4, 5) || undefined });
+      if (!m) break;
+      const num = Math.floor(sans.length / 2) + 1;
+      sans.push((isWhiteMove ? num + ". " : "") + m.san);
+    } catch (e) {
+      break;
+    }
+  }
+  return sans.join(" ");
+}
+
+// 「なぜ最善か」の簡易注釈を生成する
+function buildReason(info) {
+  const parts = [];
+  const mateMatch = info.scoreText.match(/mate (-?\d+)/);
+  if (mateMatch) {
+    const n = Math.abs(Number(mateMatch[1]));
+    parts.push(n + " 手で詰ませる強制手順");
+  } else {
+    const chess = fenChess;
+    chess.reset();
+    chess.load(FEN);
+    let captured = null;
+    try {
+      const m = chess.move({ from: info.best.slice(0, 2), to: info.best.slice(2, 4), promotion: info.best.slice(4, 5) || undefined });
+      if (m && m.captured) captured = m.captured;
+    } catch (e) { /* ignore */ }
+    if (captured) {
+      const names = { p: "ポーン", n: "ナイト", b: "ビショップ", r: "ルーク", q: "クイーン" };
+      parts.push(names[captured] + "を取る駒得の手");
+    }
+    const cpMatch = info.scoreText.match(/cp (-?\d+)/);
+    if (cpMatch) {
+      const cp = Number(cpMatch[1]);
+      if (cp >= 200) parts.push("白が約 " + Math.round(cp / 100) + " ポーン優勢になる");
+    }
+  }
+  if (info.pvText) parts.push("読み筋: " + info.pvText);
+  return parts.length ? parts.join("。") : "探索上もっとも評価値が高い手";
+}
+
 function initWorker() {
   return new Promise((resolve, reject) => {
     try {
@@ -68,17 +119,19 @@ btn.addEventListener("click", async () => {
     await loadChessJs();
 
     const info = await new Promise((resolve, reject) => {
-      let last = { depth: 0, scoreText: "" };
+      let last = { depth: 0, scoreText: "", pv: "" };
       worker.onmessage = (e) => {
         const line = String(e.data);
         if (line.startsWith("info depth")) {
           const d = line.match(/ depth (\d+)/);
           const cp = line.match(/score cp (-?\d+)/);
           const mate = line.match(/score mate (-?\d+)/);
+          const pv = line.match(/ pv (.+)$/);
           if (d) {
             last.depth = Number(d[1]);
             if (mate) last.scoreText = "mate " + mate[1];
             else if (cp) last.scoreText = "cp " + cp[1];
+            if (pv) last.pv = pv[1];
           }
         } else if (line.startsWith("bestmove")) {
           resolve({ best: line.split(/\s+/)[1], ...last });
@@ -91,8 +144,17 @@ btn.addEventListener("click", async () => {
 
     const san = uciToSan(info.best);
     highlightSquares(info.best.slice(0, 2), info.best.slice(2, 4));
+    info.pvText = pvToSanText(info.pv);
     const score = info.scoreText ? info.scoreText : "不明";
-    resultEl.textContent = "最善手: " + san + "（評価値 " + score + "、深さ " + info.depth + "）";
+    const reason = buildReason(info);
+    resultEl.innerHTML = "";
+    const line1 = document.createElement("div");
+    line1.textContent = "最善手: " + san + "（評価値 " + score + "、深さ " + info.depth + "）";
+    const line2 = document.createElement("div");
+    line2.className = "reason";
+    line2.textContent = "理由: " + reason;
+    resultEl.appendChild(line1);
+    resultEl.appendChild(line2);
   } catch (err) {
     console.error(err);
     resultEl.textContent = "エンジンを初期化できませんでした";
@@ -187,6 +249,13 @@ export const BoardPage: FC<{ fen: string }> = ({ fen }) => {
           }
           button:disabled { opacity: 0.5; cursor: default; }
           #result { margin-top: 8px; font-weight: bold; }
+          #result .reason {
+            margin-top: 4px;
+            font-weight: normal;
+            font-size: 0.85rem;
+            color: #444;
+            line-height: 1.5;
+          }
           footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid #ddd; }
         `}</style>
       </head>
