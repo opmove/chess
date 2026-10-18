@@ -1,4 +1,5 @@
 import type { FC } from "hono/jsx";
+import { getCastlingStatus } from "../services/position";
 
 const PIECES: Record<string, string> = {
   K: "♔", Q: "♕", R: "♖", B: "♗", N: "♘", P: "♙",
@@ -64,6 +65,11 @@ function pvToSanText(pv) {
 // 「なぜ最善か」の簡易注釈を生成する
 function buildReason(info) {
   const parts = [];
+  const san0 = uciToSan(info.best);
+  if (san0 === "O-O" || san0 === "O-O-O") {
+    if (san0 === "O-O") parts.push("キャスリング（ショート）。王の安全を確保しルークを活性化できる");
+    else parts.push("キャスリング（ロング）。王の安全を確保しルークを活性化できる");
+  }
   const mateMatch = info.scoreText.match(/mate (-?\d+)/);
   if (mateMatch) {
     const n = Math.abs(Number(mateMatch[1]));
@@ -166,8 +172,22 @@ btn.addEventListener("click", async () => {
 
 const FILES = "abcdefgh";
 
-const Board: FC<{ fen: string }> = ({ fen }) => {
-  const placement = fen.split(" ")[0];
+const Board: FC<{ fen: string; lastMove: string | null }> = ({ fen, lastMove }) => {
+  const fields = fen.split(" ");
+  const placement = fields[0];
+  const epSquare = fields[3] && fields[3] !== "-" ? fields[3] : null;
+  const rights = fields[2] ?? "-";
+  // キャスリング権のあるマス（e1/h1/a1, e8/h8/a8）と、そのサイドが現在着手可能か
+  const castle = getCastlingStatus(fen);
+  const castleMark = new Map<string, boolean>();
+  if (castle) {
+    if (rights.includes("K")) { castleMark.set("e1", (castleMark.get("e1") ?? false) || castle.currentlyLegal.whiteShort); castleMark.set("h1", castle.currentlyLegal.whiteShort); }
+    if (rights.includes("Q")) { castleMark.set("e1", (castleMark.get("e1") ?? false) || castle.currentlyLegal.whiteLong); castleMark.set("a1", castle.currentlyLegal.whiteLong); }
+    if (rights.includes("k")) { castleMark.set("e8", (castleMark.get("e8") ?? false) || castle.currentlyLegal.blackShort); castleMark.set("h8", castle.currentlyLegal.blackShort); }
+    if (rights.includes("q")) { castleMark.set("e8", (castleMark.get("e8") ?? false) || castle.currentlyLegal.blackLong); castleMark.set("a8", castle.currentlyLegal.blackLong); }
+  }
+  const lmFrom = lastMove ? lastMove.slice(0, 2) : null;
+  const lmTo = lastMove ? lastMove.slice(2, 4) : null;
   const ranks = placement.split("/");
   const squares: ReturnType<FC>[] = [];
   for (let r = 0; r < 8; r++) {
@@ -175,9 +195,25 @@ const Board: FC<{ fen: string }> = ({ fen }) => {
     const renderSquare = (piece?: string) => {
       const isLight = (file + r) % 2 === 1;
       const sq = FILES[file] + (8 - r);
+      const classes = ["square", isLight ? "light" : "dark"];
+      if (sq === lmFrom || sq === lmTo) classes.push("lm");
+      if (sq === epSquare) classes.push("ep");
+      const castleLegal = castleMark.get(sq);
+      if (castleMark.has(sq)) classes.push(castleLegal ? "castle-ok" : "castle-rights");
       squares.push(
-        <div key={sq} data-sq={sq} class={"square " + (isLight ? "light" : "dark")}>
+        <div
+          key={sq}
+          data-sq={sq}
+          class={classes.join(" ")}
+          title={
+            sq === epSquare ? "直前にポーンが2マス進み、アンパッサンで取れるマス"
+            : castleMark.has(sq) ? (castleLegal ? "キャスリング可能（発動条件を満たす）" : "キャスリング権はあるが、現在は発動条件を満たさない（王の通過路の攻撃・間のマス等）")
+            : undefined
+          }
+        >
           {piece ? <span class="piece">{PIECES[piece]}</span> : null}
+          {sq === epSquare ? <span class="ep-dot" /> : null}
+          {castleMark.has(sq) ? <span class="castle-mark">{castleLegal ? "○" : "△"}</span> : null}
         </div>,
       );
       file++;
@@ -193,8 +229,22 @@ const Board: FC<{ fen: string }> = ({ fen }) => {
   return <div class="board">{squares}</div>;
 };
 
-export const BoardPage: FC<{ fen: string }> = ({ fen }) => {
+export const BoardPage: FC<{ fen: string; lastMove?: string | null }> = ({ fen, lastMove = null }) => {
   const turn = fen.split(" ")[1] === "b" ? "Black to move" : "White to move";
+  const castle = getCastlingStatus(fen);
+  const castleSummary = (() => {
+    if (!castle || castle.rights === "-") return null;
+    const parts: string[] = [];
+    if (castle.currentlyLegal.whiteShort) parts.push("白ショート○");
+    else if (castle.rights.includes("K")) parts.push("白ショート△（権利のみ）");
+    if (castle.currentlyLegal.whiteLong) parts.push("白ロング○");
+    else if (castle.rights.includes("Q")) parts.push("白ロング△（権利のみ）");
+    if (castle.currentlyLegal.blackShort) parts.push("黒ショート○");
+    else if (castle.rights.includes("k")) parts.push("黒ショート△（権利のみ）");
+    if (castle.currentlyLegal.blackLong) parts.push("黒ロング○");
+    else if (castle.rights.includes("q")) parts.push("黒ロング△（権利のみ）");
+    return "キャスリング: " + (parts.length ? parts.join(" / ") : "権利なし");
+  })();
   return (
     <html lang="ja">
       <head>
@@ -214,6 +264,7 @@ export const BoardPage: FC<{ fen: string }> = ({ fen }) => {
           header h1 { font-size: 1.4rem; margin-bottom: 8px; }
           .status { margin-bottom: 10px; }
           .turn { font-weight: bold; margin-bottom: 4px; }
+          .castle-summary { font-size: 0.8rem; color: #2a7d2a; margin-bottom: 4px; }
           .fen {
             font-family: monospace;
             font-size: 0.75rem;
@@ -239,6 +290,30 @@ export const BoardPage: FC<{ fen: string }> = ({ fen }) => {
           .light { background: #f0d9b5; }
           .dark { background: #b58863; }
           .square.hl { box-shadow: inset 0 0 0 100px rgba(0, 180, 0, 0.45); }
+          .square.lm { box-shadow: inset 0 0 0 100px rgba(255, 213, 79, 0.55); }
+          /* 直前手（黄）と最善手（緑）が重なった場合は最善手を優先 */
+          .square.lm.hl { box-shadow: inset 0 0 0 100px rgba(0, 180, 0, 0.45); }
+          .square.ep { position: relative; }
+          .ep-dot {
+            position: absolute;
+            bottom: 4%;
+            right: 6%;
+            width: 18%;
+            height: 18%;
+            border-radius: 50%;
+            background: rgba(0, 120, 255, 0.8);
+          }
+          .square.ep, .square.castle-ok, .square.castle-rights { position: relative; }
+          .castle-mark {
+            position: absolute;
+            top: 2%;
+            left: 4%;
+            font-size: clamp(10px, 3vw, 16px);
+            line-height: 1;
+            color: #fff;
+            text-shadow: 0 0 2px #000;
+          }
+          .castle-ok { box-shadow: inset 0 0 0 100px rgba(0, 180, 0, 0.25); }
           .best-area { margin-bottom: 16px; }
           button {
             font-size: 1rem;
@@ -267,9 +342,10 @@ export const BoardPage: FC<{ fen: string }> = ({ fen }) => {
           </header>
           <div class="status">
             <div class="turn">{turn}</div>
+            {castleSummary ? <div class="castle-summary">{castleSummary}</div> : null}
             <div class="fen">{fen}</div>
           </div>
-          <Board fen={fen} />
+          <Board fen={fen} lastMove={lastMove} />
           <div class="best-area">
             <button id="show-best" type="button">最善手を表示</button>
             <div id="result"></div>

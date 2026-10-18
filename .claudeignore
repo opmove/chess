@@ -1,0 +1,7 @@
+node_modules/
+.wrangler/
+.git/
+public/stockfish.js
+public/stockfish.wasm
+public/chess.js
+*.log
