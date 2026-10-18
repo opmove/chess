@@ -8,7 +8,8 @@ function randomInt(min: number, max: number): number {
 }
 
 function randomGamePlies(): number {
-  return randomInt(MIN_PLIES, MAX_PLIES);
+  // 偶数手にすると手番が White に戻る
+  return randomInt(MIN_PLIES / 2, MAX_PLIES / 2) * 2;
 }
 
 export function generateRandomFen(): string {
@@ -39,7 +40,10 @@ export function generateRandomFen(): string {
 
 export function validateFen(fen: string): string | null {
   try {
-    return new Chess(fen).fen();
+    const chess = new Chess(fen);
+    // White to move の局面のみ受け付ける
+    if (chess.turn() !== "w") return null;
+    return chess.fen();
   } catch {
     return null;
   }

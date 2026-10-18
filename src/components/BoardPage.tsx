@@ -32,6 +32,14 @@ function uciToSan(uci) {
   return move ? move.san : uci;
 }
 
+function highlightSquares(from, to) {
+  document.querySelectorAll(".square.hl").forEach((el) => el.classList.remove("hl"));
+  for (const sq of [from, to]) {
+    const el = document.querySelector('.square[data-sq="' + sq + '"]');
+    if (el) el.classList.add("hl");
+  }
+}
+
 function initWorker() {
   return new Promise((resolve, reject) => {
     try {
@@ -82,6 +90,7 @@ btn.addEventListener("click", async () => {
     });
 
     const san = uciToSan(info.best);
+    highlightSquares(info.best.slice(0, 2), info.best.slice(2, 4));
     const score = info.scoreText ? info.scoreText : "不明";
     resultEl.textContent = "最善手: " + san + "（評価値 " + score + "、深さ " + info.depth + "）";
   } catch (err) {
@@ -93,28 +102,29 @@ btn.addEventListener("click", async () => {
 });
 `;
 
+const FILES = "abcdefgh";
+
 const Board: FC<{ fen: string }> = ({ fen }) => {
   const placement = fen.split(" ")[0];
   const ranks = placement.split("/");
-  const squares = [];
+  const squares: ReturnType<FC>[] = [];
   for (let r = 0; r < 8; r++) {
     let file = 0;
+    const renderSquare = (piece?: string) => {
+      const isLight = (file + r) % 2 === 1;
+      const sq = FILES[file] + (8 - r);
+      squares.push(
+        <div key={sq} data-sq={sq} class={"square " + (isLight ? "light" : "dark")}>
+          {piece ? <span class="piece">{PIECES[piece]}</span> : null}
+        </div>,
+      );
+      file++;
+    };
     for (const ch of ranks[r]) {
       if (/\d/.test(ch)) {
-        const empty = Number(ch);
-        for (let i = 0; i < empty; i++) {
-          const isLight = (file + r) % 2 === 1;
-          squares.push(<div key={r + "-" + file} class={"square " + (isLight ? "light" : "dark")} />);
-          file++;
-        }
+        for (let i = 0; i < Number(ch); i++) renderSquare();
       } else {
-        const isLight = (file + r) % 2 === 1;
-        squares.push(
-          <div key={r + "-" + file} class={"square " + (isLight ? "light" : "dark")}>
-            <span class="piece">{PIECES[ch]}</span>
-          </div>,
-        );
-        file++;
+        renderSquare(ch);
       }
     }
   }
@@ -165,6 +175,7 @@ export const BoardPage: FC<{ fen: string }> = ({ fen }) => {
           }
           .light { background: #f0d9b5; }
           .dark { background: #b58863; }
+          .square.hl { box-shadow: inset 0 0 0 100px rgba(0, 180, 0, 0.45); }
           .best-area { margin-bottom: 16px; }
           button {
             font-size: 1rem;
