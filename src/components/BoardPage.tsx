@@ -223,6 +223,7 @@ export const BoardPage: FC<{ fen: string }> = ({ fen }) => {
           .board {
             display: grid;
             grid-template-columns: repeat(8, 1fr);
+            grid-template-rows: repeat(8, 1fr);
             width: 100%;
             aspect-ratio: 1;
             border: 2px solid #666;
