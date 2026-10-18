@@ -101,7 +101,12 @@ const Board: FC<{ fen: string }> = ({ fen }) => {
     let file = 0;
     for (const ch of ranks[r]) {
       if (/\d/.test(ch)) {
-        file += Number(ch);
+        const empty = Number(ch);
+        for (let i = 0; i < empty; i++) {
+          const isLight = (file + r) % 2 === 1;
+          squares.push(<div key={r + "-" + file} class={"square " + (isLight ? "light" : "dark")} />);
+          file++;
+        }
       } else {
         const isLight = (file + r) % 2 === 1;
         squares.push(
